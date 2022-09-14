@@ -1,6 +1,7 @@
 package simulator
 
 import (
+	"context"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -73,7 +74,7 @@ func Simulate(cluster ResourceTypes, apps []AppResource, opts ...Option) (*Simul
 	defer trace.LogIfLong(1 * time.Second)
 
 	// init simulator
-	sim, err := NewSimulator(opts...)
+	sim, err := NewSimulator(context.Background(), opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +107,7 @@ func Simulate(cluster ResourceTypes, apps []AppResource, opts ...Option) (*Simul
 
 	// schedule pods
 	for _, app := range apps {
-		result, err = sim.ScheduleApp(app)
+		result, err = sim.ScheduleApp(context.Background(), app)
 		if err != nil {
 			return nil, err
 		}

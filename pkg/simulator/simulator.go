@@ -85,7 +85,7 @@ var defaultSimulatorOptions = simulatorOptions{
 }
 
 // NewSimulator generates all components that will be needed to simulate scheduling and returns a complete simulator
-func NewSimulator(opts ...Option) (*Simulator, error) {
+func NewSimulator(ctx context.Context, opts ...Option) (*Simulator, error) {
 	var err error
 	// Step 0: configures a Simulator by opts
 	options := defaultSimulatorOptions
@@ -94,25 +94,17 @@ func NewSimulator(opts ...Option) (*Simulator, error) {
 	}
 
 	// Step 1: get scheduler CompletedConfig and set the list of scheduler bind plugins to Simon.
-	kubeSchedulerConfig, err := GetAndSetSchedulerConfig(options.schedulerConfig)
-	if err != nil {
-		return nil, err
-	}
+	kubeSchedulerConfig := GetSchedulerConfig()
 
 	// Step 2: create client
 	fakeClient := fakeclientset.NewSimpleClientset()
-	kubeclient, err := utils.CreateKubeClient(options.kubeconfig)
-	if err != nil {
-		kubeclient = nil
-	}
 	kubeSchedulerConfig.Client = fakeClient
 
 	// Step 3: Create the simulator
-	ctx, cancel := context.WithCancel(context.Background())
-	scheduleOneCtx, scheduleOneCancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
+	scheduleOneCtx, scheduleOneCancel := context.WithCancel(ctx)
 	sim := &Simulator{
 		fakeclient:            fakeClient,
-		kubeclient:            kubeclient,
 		simulatorStop:         make(chan struct{}),
 		ctx:                   ctx,
 		cancelFunc:            cancel,
@@ -229,7 +221,7 @@ func (sim *Simulator) RunCluster(cluster ResourceTypes) (*SimulateResult, error)
 	return sim.syncClusterResourceList(cluster)
 }
 
-func (sim *Simulator) ScheduleApp(app AppResource) (*SimulateResult, error) {
+func (sim *Simulator) ScheduleApp(ctx context.Context, app AppResource) (*SimulateResult, error) {
 	// 由 AppResource 生成 Pods
 	appPods, err := GenerateValidPodsFromAppResources(sim.fakeclient, app.Name, app.Resource)
 	if err != nil {
@@ -249,22 +241,22 @@ func (sim *Simulator) ScheduleApp(app AppResource) (*SimulateResult, error) {
 	}
 
 	for _, cm := range app.Resource.ConfigMaps {
-		if _, err := sim.fakeclient.CoreV1().ConfigMaps(cm.Namespace).Create(context.Background(), cm, metav1.CreateOptions{}); err != nil {
+		if _, err := sim.fakeclient.CoreV1().ConfigMaps(cm.Namespace).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
 			return nil, err
 		}
 	}
 	for _, sc := range app.Resource.StorageClasss {
-		if _, err := sim.fakeclient.StorageV1().StorageClasses().Create(context.Background(), sc, metav1.CreateOptions{}); err != nil {
+		if _, err := sim.fakeclient.StorageV1().StorageClasses().Create(ctx, sc, metav1.CreateOptions{}); err != nil {
 			return nil, err
 		}
 	}
 	for _, pdb := range app.Resource.PodDisruptionBudgets {
-		if _, err := sim.fakeclient.PolicyV1beta1().PodDisruptionBudgets(pdb.Namespace).Create(context.Background(), pdb, metav1.CreateOptions{}); err != nil {
+		if _, err := sim.fakeclient.PolicyV1beta1().PodDisruptionBudgets(pdb.Namespace).Create(ctx, pdb, metav1.CreateOptions{}); err != nil {
 			return nil, err
 		}
 	}
 
-	failedPod, err := sim.schedulePods(appPods)
+	failedPod, err := sim.schedulePods(ctx, appPods)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +298,7 @@ func (sim *Simulator) runScheduler() {
 }
 
 // Run starts to schedule pods
-func (sim *Simulator) schedulePods(pods []*corev1.Pod) ([]UnscheduledPod, error) {
+func (sim *Simulator) schedulePods(ctx context.Context, pods []*corev1.Pod) ([]UnscheduledPod, error) {
 	var failedPods []UnscheduledPod
 	var progressBar *pterm.ProgressbarPrinter
 	if !sim.disablePTerm {
@@ -320,7 +312,7 @@ func (sim *Simulator) schedulePods(pods []*corev1.Pod) ([]UnscheduledPod, error)
 			// Update the title of the progressbar.
 			progressBar.UpdateTitle(fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
 		}
-		if _, err := sim.fakeclient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		if _, err := sim.fakeclient.CoreV1().Pods(pod.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 			return nil, fmt.Errorf("%s %s/%s: %s", simontype.CreatePodError, pod.Namespace, pod.Name, err.Error())
 		}
 
@@ -331,7 +323,7 @@ func (sim *Simulator) schedulePods(pods []*corev1.Pod) ([]UnscheduledPod, error)
 		}
 
 		if strings.Contains(sim.status.stopReason, "failed") {
-			if err := sim.fakeclient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{}); err != nil {
+			if err := sim.fakeclient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
 				return nil, fmt.Errorf("%s %s/%s: %s", simontype.DeletePodError, pod.Namespace, pod.Name, err.Error())
 			}
 			failedPods = append(failedPods, UnscheduledPod{
@@ -434,8 +426,7 @@ func (sim *Simulator) syncClusterResourceList(resourceList ResourceTypes) (*Simu
 	}
 
 	// sync pods
-	pterm.FgYellow.Printf("sync %d pod(s) to fake cluster\n", len(resourceList.Pods))
-	failedPods, err := sim.schedulePods(resourceList.Pods)
+	failedPods, err := sim.schedulePods(context.TODO(), resourceList.Pods)
 	if err != nil {
 		return nil, err
 	}

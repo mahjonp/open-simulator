@@ -300,6 +300,26 @@ func GetRecorderFactory(cc *schedconfig.CompletedConfig) profile.RecorderFactory
 	}
 }
 
+var globalSchedulerConfig = initSchedulerConfig()
+
+func initSchedulerConfig() schedconfig.Config {
+	cfg, err := GetAndSetSchedulerConfig("")
+	if err != nil {
+		panic(err)
+	}
+	return *cfg.Config
+}
+
+func GetSchedulerConfig() *config.CompletedConfig {
+	copy := globalSchedulerConfig
+	copy = schedconfig.Config{
+		ComponentConfig:  *copy.ComponentConfig.DeepCopy(),
+		EventBroadcaster: events.NewEventBroadcasterAdapter(fakeclientset.NewSimpleClientset()),
+	}
+	cfg := copy.Complete()
+	return &cfg
+}
+
 // GetAndSetSchedulerConfig gets scheduler CompletedConfig and sets the list of scheduler bind plugins to Simon.
 func GetAndSetSchedulerConfig(schedulerConfig string) (*config.CompletedConfig, error) {
 	versionedCfg := kubeschedulerconfigv1beta1.KubeSchedulerConfiguration{}

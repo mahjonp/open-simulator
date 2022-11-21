@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -33,8 +32,6 @@ import (
 	"k8s.io/kubernetes/pkg/apis/core/validation"
 	"k8s.io/kubernetes/pkg/controller/daemon"
 
-	localcache "github.com/alibaba/open-local/pkg/scheduler/algorithm/cache"
-	localutils "github.com/alibaba/open-local/pkg/utils"
 	simontype "github.com/alibaba/open-simulator/pkg/type"
 	gpusharecache "github.com/alibaba/open-simulator/pkg/type/open-gpu-share/cache"
 )
@@ -239,56 +236,7 @@ func MakeValidPodsByStatefulSet(ss *appsv1.StatefulSet) ([]*corev1.Pod, error) {
 		pods = append(pods, validPod)
 	}
 
-	if err := SetStorageAnnotationOnPods(pods, ss.Spec.VolumeClaimTemplates, ss.Name); err != nil {
-		return nil, err
-	}
-
 	return pods, nil
-}
-
-func SetStorageAnnotationOnPods(pods []*corev1.Pod, volumeClaimTemplates []corev1.PersistentVolumeClaim, stsName string) error {
-	var volumes VolumeRequest
-	volumes.Volumes = make([]Volume, 0)
-	for _, pvc := range volumeClaimTemplates {
-		if pvc.Spec.StorageClassName != nil {
-			if *pvc.Spec.StorageClassName == OpenLocalSCNameLVM || *pvc.Spec.StorageClassName == YodaSCNameLVM {
-				volume := Volume{
-					Size:             localutils.GetPVCRequested(&pvc),
-					Kind:             "LVM",
-					StorageClassName: *pvc.Spec.StorageClassName,
-				}
-				volumes.Volumes = append(volumes.Volumes, volume)
-			} else if *pvc.Spec.StorageClassName == OpenLocalSCNameDeviceSSD || *pvc.Spec.StorageClassName == OpenLocalSCNameMountPointSSD || *pvc.Spec.StorageClassName == YodaSCNameMountPointSSD || *pvc.Spec.StorageClassName == YodaSCNameDeviceSSD {
-				volume := Volume{
-					Size:             localutils.GetPVCRequested(&pvc),
-					Kind:             "SSD",
-					StorageClassName: *pvc.Spec.StorageClassName,
-				}
-				volumes.Volumes = append(volumes.Volumes, volume)
-			} else if *pvc.Spec.StorageClassName == OpenLocalSCNameDeviceHDD || *pvc.Spec.StorageClassName == OpenLocalSCNameMountPointHDD || *pvc.Spec.StorageClassName == YodaSCNameMountPointHDD || *pvc.Spec.StorageClassName == YodaSCNameDeviceHDD {
-				volume := Volume{
-					Size:             localutils.GetPVCRequested(&pvc),
-					Kind:             "HDD",
-					StorageClassName: *pvc.Spec.StorageClassName,
-				}
-				volumes.Volumes = append(volumes.Volumes, volume)
-			} else {
-				log.Errorf("unsupported storage class: %s", *pvc.Spec.StorageClassName)
-			}
-		} else {
-			log.Errorf("empty storageClassName in volumeTemplate of statefulset %s is not supported", stsName)
-		}
-	}
-
-	for _, pod := range pods {
-		b, err := json.Marshal(volumes)
-		if err != nil {
-			return err
-		}
-		metav1.SetMetaDataAnnotation(&pod.ObjectMeta, simontype.AnnoPodLocalStorage, string(b))
-	}
-
-	return nil
 }
 
 func SetObjectMetaFromObject(owner metav1.Object, template metav1.Object) metav1.ObjectMeta {
@@ -507,11 +455,6 @@ func ValidatePod(pod *corev1.Pod) error {
 	return nil
 }
 
-type NodeStorage struct {
-	VGs     []localcache.SharedResource    `json:"vgs"`
-	Devices []localcache.ExclusiveResource `json:"devices"`
-}
-
 type Volume struct {
 	Size int64 `json:"size,string"`
 	// Kind 可以是 LVM 或 HDD 或 SSD
@@ -522,44 +465,6 @@ type Volume struct {
 
 type VolumeRequest struct {
 	Volumes []Volume `json:"volumes"`
-}
-
-func GetNodeStorage(node *corev1.Node) (*NodeStorage, error) {
-	nodeStorageStr, exist := node.Annotations[simontype.AnnoNodeLocalStorage]
-	if !exist {
-		return nil, nil
-	}
-
-	nodeStorage := new(NodeStorage)
-	if err := ffjson.Unmarshal([]byte(nodeStorageStr), nodeStorage); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal info of node %s: %s ", node.Name, err.Error())
-	}
-
-	return nodeStorage, nil
-}
-
-func GetNodeCache(node *corev1.Node) (*localcache.NodeCache, error) {
-	nodeStorage, err := GetNodeStorage(node)
-	if err != nil {
-		return nil, err
-	} else if nodeStorage == nil {
-		return nil, nil
-	}
-
-	nc := localcache.NewNodeCache(node.Name)
-	var vgRes map[localcache.ResourceName]localcache.SharedResource = make(map[localcache.ResourceName]localcache.SharedResource)
-	for _, vg := range nodeStorage.VGs {
-		vgRes[localcache.ResourceName(vg.Name)] = vg
-	}
-	nc.VGs = vgRes
-
-	var deviceRes map[localcache.ResourceName]localcache.ExclusiveResource = make(map[localcache.ResourceName]localcache.ExclusiveResource)
-	for _, device := range nodeStorage.Devices {
-		deviceRes[localcache.ResourceName(device.Device)] = device
-	}
-	nc.Devices = deviceRes
-
-	return nc, nil
 }
 
 func GetPodStorage(pod *corev1.Pod) *VolumeRequest {
@@ -769,7 +674,7 @@ func GetMasterFromKubeConfig(filename string) (string, error) {
 
 func SetDaemonSetPodNodeNameByNodeAffinity(affinity *corev1.Affinity, nodename string) *corev1.Affinity {
 	nodeSelReq := corev1.NodeSelectorRequirement{
-		Key:      api.ObjectNameField,
+		Key:      metav1.ObjectNameField,
 		Operator: corev1.NodeSelectorOpIn,
 		Values:   []string{nodename},
 	}

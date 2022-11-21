@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	localcache "github.com/alibaba/open-local/pkg/scheduler/algorithm/cache"
 	"github.com/alibaba/open-simulator/pkg/test"
 	simontype "github.com/alibaba/open-simulator/pkg/type"
 	"github.com/alibaba/open-simulator/pkg/utils"
@@ -58,27 +57,6 @@ func TestSimulate(t *testing.T) {
 									Effect: corev1.TaintEffectNoSchedule,
 								},
 							}),
-							test.WithNodeLocalStorage(utils.NodeStorage{
-								VGs: []localcache.SharedResource{
-									{
-										Name:     "yoda-pool0",
-										Capacity: 107374182400,
-									},
-									{
-										Name:     "yoda-pool1",
-										Capacity: 107374182400,
-									},
-								},
-								Devices: []localcache.ExclusiveResource{
-									{
-										Name:        "/dev/vdd",
-										Device:      "/dev/vdd",
-										Capacity:    107374182400,
-										IsAllocated: false,
-										MediaType:   "hdd",
-									},
-								},
-							}),
 						),
 						// master-2
 						test.MakeFakeNode("master-2", "8", "16Gi",
@@ -111,27 +89,6 @@ func TestSimulate(t *testing.T) {
 								"kubernetes.io/hostname":         "worker-1",
 								"kubernetes.io/os":               "linux",
 								"node-role.kubernetes.io/worker": "",
-							}),
-							test.WithNodeLocalStorage(utils.NodeStorage{
-								VGs: []localcache.SharedResource{
-									{
-										Name:     "yoda-pool0",
-										Capacity: 107374182400,
-									},
-									{
-										Name:     "yoda-pool1",
-										Capacity: 107374182400,
-									},
-								},
-								Devices: []localcache.ExclusiveResource{
-									{
-										Name:        "/dev/vdd",
-										Device:      "/dev/vdd",
-										Capacity:    107374182400,
-										IsAllocated: false,
-										MediaType:   "hdd",
-									},
-								},
 							}),
 						),
 					},

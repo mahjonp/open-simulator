@@ -117,7 +117,6 @@ func NewSimulator(ctx context.Context, opts ...Option) (*Simulator, error) {
 
 	// Step 4: create informer
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(sim.fakeclient, 0)
-	storagev1Informers := kubeInformerFactory.Storage().V1()
 	scInformer := kubeInformerFactory.Storage().V1().StorageClasses().Informer()
 	csiNodeInformer := kubeInformerFactory.Storage().V1().CSINodes().Informer()
 	cmInformer := kubeInformerFactory.Core().V1().ConfigMaps().Informer()
@@ -183,23 +182,18 @@ func NewSimulator(ctx context.Context, opts ...Option) (*Simulator, error) {
 		simontype.SimonPluginName: func(configuration runtime.Object, f framework.Handle) (framework.Plugin, error) {
 			return simonplugin.NewSimonPlugin(sim.fakeclient, configuration, f)
 		},
-		simontype.OpenLocalPluginName: func(configuration runtime.Object, f framework.Handle) (framework.Plugin, error) {
-			return simonplugin.NewLocalPlugin(fakeClient, storagev1Informers, configuration, f)
-		},
-		simontype.OpenGpuSharePluginName: func(configuration runtime.Object, f framework.Handle) (framework.Plugin, error) {
-			return simonplugin.NewGpuSharePlugin(fakeClient, configuration, f)
-		},
 	}
 	for name, plugin := range options.extraRegistry {
 		bindRegistry[name] = plugin
 	}
+
 	sim.scheduler, err = scheduler.New(
 		sim.fakeclient,
 		sim.informerFactory,
+		nil,
 		GetRecorderFactory(kubeSchedulerConfig),
 		sim.ctx.Done(),
 		scheduler.WithProfiles(kubeSchedulerConfig.ComponentConfig.Profiles...),
-		scheduler.WithAlgorithmSource(kubeSchedulerConfig.ComponentConfig.AlgorithmSource),
 		scheduler.WithPercentageOfNodesToScore(kubeSchedulerConfig.ComponentConfig.PercentageOfNodesToScore),
 		scheduler.WithFrameworkOutOfTreeRegistry(bindRegistry),
 		scheduler.WithPodMaxBackoffSeconds(kubeSchedulerConfig.ComponentConfig.PodMaxBackoffSeconds),

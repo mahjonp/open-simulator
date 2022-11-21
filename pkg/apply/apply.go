@@ -17,7 +17,6 @@ import (
 	resourcehelper "k8s.io/kubectl/pkg/util/resource"
 	"sigs.k8s.io/yaml"
 
-	localcache "github.com/alibaba/open-local/pkg/scheduler/algorithm/cache"
 	"github.com/alibaba/open-simulator/pkg/api/v1alpha1"
 	"github.com/alibaba/open-simulator/pkg/chart"
 	"github.com/alibaba/open-simulator/pkg/simulator"
@@ -398,61 +397,6 @@ func reportClusterInfo(nodeStatuses []simulator.NodeStatus, extendedResources []
 	// report extended resource info (e.g., node storage, GPU)
 	if len(extendedResources) != 0 {
 		pterm.FgYellow.Println("Extended Resource Info")
-		if containLocalStorage(extendedResources) {
-			pterm.FgYellow.Println("Node Local Storage")
-			nodeStorageTable := pterm.DefaultTable.WithHasHeader()
-			var nodeStorageTableData [][]string
-			nodeStorageTableData = append(nodeStorageTableData, []string{
-				"Node",
-				"Storage Kind",
-				"Storage Name",
-				"Storage Allocatable",
-				"Storage Requests",
-			})
-			for _, status := range nodeStatuses {
-				node := status.Node
-				if nodeStorageStr, exist := node.Annotations[simontype.AnnoNodeLocalStorage]; exist {
-					var nodeStorage utils.NodeStorage
-					if err := ffjson.Unmarshal([]byte(nodeStorageStr), &nodeStorage); err != nil {
-						log.Fatalf("failed to unmarshal storage information of node(%s): %v", node.Name, err)
-					}
-					var storageData []string
-					for _, vg := range nodeStorage.VGs {
-						capacity := resource.NewQuantity(vg.Capacity, resource.BinarySI)
-						request := resource.NewQuantity(vg.Requested, resource.BinarySI)
-						storageData = []string{
-							node.Name,
-							"VG",
-							vg.Name,
-							capacity.String(),
-							fmt.Sprintf("%s(%d%%)", request.String(), int64(float64(vg.Requested)/float64(vg.Capacity)*100)),
-						}
-						nodeStorageTableData = append(nodeStorageTableData, storageData)
-					}
-
-					for _, device := range nodeStorage.Devices {
-						capacity := resource.NewQuantity(device.Capacity, resource.BinarySI)
-						used := "unused"
-						if device.IsAllocated {
-							used = "used"
-						}
-						storageData = []string{
-							node.Name,
-							fmt.Sprintf("Device(%s)", device.MediaType),
-							device.Device,
-							capacity.String(),
-							used,
-						}
-						nodeStorageTableData = append(nodeStorageTableData, storageData)
-					}
-				}
-			}
-			// Send output
-			if err := nodeStorageTable.WithData(nodeStorageTableData).Render(); err != nil {
-				pterm.FgRed.Printf("fail to render cluster table: %s\n", err.Error())
-				os.Exit(1)
-			}
-		}
 		if containGpu(extendedResources) {
 			var podList []*corev1.Pod
 			pterm.FgYellow.Println("GPU Node Resource")
@@ -552,9 +496,6 @@ func reportNodeInfo(nodeStatuses []simulator.NodeStatus, extendedResources []str
 		"CPU Requests",
 		"Memory Requests",
 	}
-	if containLocalStorage(extendedResources) {
-		header = append(header, "Volume Request")
-	}
 	if containGpu(extendedResources) {
 		header = append(header, "GPU Mem Requests")
 	}
@@ -588,22 +529,6 @@ func reportNodeInfo(nodeStatuses []simulator.NodeStatus, extendedResources []str
 				fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
 				fmt.Sprintf("%s(%d%%)", cpuReq.String(), int64(fractionCpuReq)),
 				fmt.Sprintf("%s(%d%%)", memoryReq.String(), int64(fractionMemoryReq)),
-			}
-
-			// Storage
-			if containLocalStorage(extendedResources) {
-				podVolumeStr := ""
-				if volumes := utils.GetPodStorage(pod); volumes != nil {
-					for i, volume := range volumes.Volumes {
-						volumeQuantity := resource.NewQuantity(volume.Size, resource.BinarySI)
-						volumeStr := fmt.Sprintf("<%d> %s: %s", i, volume.Kind, volumeQuantity.String())
-						podVolumeStr = podVolumeStr + volumeStr
-						if i+1 != len(volumes.Volumes) {
-							podVolumeStr = fmt.Sprintf("%s\n", podVolumeStr)
-						}
-					}
-				}
-				data = append(data, podVolumeStr)
 			}
 
 			// GPU
@@ -726,7 +651,6 @@ func satisfyResourceSetting(nodeStatuses []simulator.NodeStatus) (bool, string, 
 		corev1.ResourceCPU:    resource.NewQuantity(0, resource.DecimalSI),
 		corev1.ResourceMemory: resource.NewQuantity(0, resource.DecimalSI),
 	}
-	totalVGResource := localcache.SharedResource{}
 	var allPods []corev1.Pod
 	for _, status := range nodeStatuses {
 		for _, pod := range status.Pods {
@@ -742,17 +666,6 @@ func satisfyResourceSetting(nodeStatuses []simulator.NodeStatus) (bool, string, 
 		reqs, _ := utils.GetPodsTotalRequestsAndLimitsByNodeName(allPods, node.Name)
 		totalUsedResource[corev1.ResourceCPU].Add(reqs[corev1.ResourceCPU])
 		totalUsedResource[corev1.ResourceMemory].Add(reqs[corev1.ResourceMemory])
-
-		if nodeStorageStr, exist := node.Annotations[simontype.AnnoNodeLocalStorage]; exist {
-			var nodeStorage utils.NodeStorage
-			if err := ffjson.Unmarshal([]byte(nodeStorageStr), &nodeStorage); err != nil {
-				return false, "", fmt.Errorf("error when unmarshal json data, node is %s\n", node.Name)
-			}
-			for _, vg := range nodeStorage.VGs {
-				totalVGResource.Requested += vg.Requested
-				totalVGResource.Capacity += vg.Capacity
-			}
-		}
 	}
 
 	cpuOccupancyRate := int(float64(totalUsedResource[corev1.ResourceCPU].MilliValue()) / float64(totalAllocatableResource[corev1.ResourceCPU].MilliValue()) * 100)
@@ -764,23 +677,7 @@ func satisfyResourceSetting(nodeStatuses []simulator.NodeStatus) (bool, string, 
 		return false, fmt.Sprintf("the average occupancy rate(%d%%) of memory goes beyond the env setting(%d%%)\n", memoryOccupancyRate, maxmem), nil
 	}
 
-	if totalVGResource.Capacity != 0 {
-		vgOccupancyRate := int(float64(totalVGResource.Requested) / float64(totalVGResource.Capacity) * 100)
-		if vgOccupancyRate > maxvg {
-			return false, fmt.Sprintf("the average occupancy rate(%d%%) of vg goes beyond the env setting(%d%%)\n", vgOccupancyRate, maxvg), nil
-		}
-	}
-
 	return true, "", nil
-}
-
-func containLocalStorage(extendedResources []string) bool {
-	for _, res := range extendedResources {
-		if res == "open-local" {
-			return true
-		}
-	}
-	return false
 }
 
 func containGpu(extendedResources []string) bool {

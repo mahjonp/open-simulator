@@ -6,7 +6,6 @@ import (
 
 const (
 	SimonPluginName        = "Simon"
-	OpenLocalPluginName    = "Open-Local"
 	OpenGpuSharePluginName = "Open-Gpu-Share"
 	NewNodeNamePrefix      = "simon"
 	DefaultSchedulerName   = corev1.DefaultSchedulerName

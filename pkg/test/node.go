@@ -1,10 +1,6 @@
 package test
 
 import (
-	"encoding/json"
-
-	simontype "github.com/alibaba/open-simulator/pkg/type"
-	"github.com/alibaba/open-simulator/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,13 +53,5 @@ func WithNodeLabels(labels map[string]string) FakeNodeOption {
 func WithNodeTaints(taints []corev1.Taint) FakeNodeOption {
 	return func(node *corev1.Node) {
 		node.Spec.Taints = taints
-	}
-}
-
-// WithNodeLocalStorage
-func WithNodeLocalStorage(storage utils.NodeStorage) FakeNodeOption {
-	return func(node *corev1.Node) {
-		b, _ := json.Marshal(storage)
-		metav1.SetMetaDataAnnotation(&node.ObjectMeta, simontype.AnnoNodeLocalStorage, string(b))
 	}
 }

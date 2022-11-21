@@ -18,9 +18,8 @@ import (
 	externalclientset "k8s.io/client-go/kubernetes"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/events"
-	configv1alpha1 "k8s.io/component-base/config/v1alpha1"
 	"k8s.io/component-base/logs"
-	kubeschedulerconfigv1beta1 "k8s.io/kube-scheduler/config/v1beta1"
+	kubeschedulerconfigv1beta2 "k8s.io/kube-scheduler/config/v1beta2"
 	"k8s.io/kubernetes/cmd/kube-scheduler/app/config"
 	schedconfig "k8s.io/kubernetes/cmd/kube-scheduler/app/config"
 	schedoptions "k8s.io/kubernetes/cmd/kube-scheduler/app/options"
@@ -279,7 +278,6 @@ func InitKubeSchedulerConfiguration(opts *schedoptions.Options) (*schedconfig.Co
 	// clear out all unnecessary options so no port is bound
 	// to allow running multiple instances in a row
 	opts.Deprecated = nil
-	opts.CombinedInsecureServing = nil
 	opts.SecureServing = nil
 	if err := opts.ApplyTo(c); err != nil {
 		return nil, fmt.Errorf("unable to get scheduler config: %v", err)
@@ -322,74 +320,28 @@ func GetSchedulerConfig() *config.CompletedConfig {
 
 // GetAndSetSchedulerConfig gets scheduler CompletedConfig and sets the list of scheduler bind plugins to Simon.
 func GetAndSetSchedulerConfig(schedulerConfig string) (*config.CompletedConfig, error) {
-	versionedCfg := kubeschedulerconfigv1beta1.KubeSchedulerConfiguration{}
-	versionedCfg.DebuggingConfiguration = *configv1alpha1.NewRecommendedDebuggingConfiguration()
+	versionedCfg := kubeschedulerconfigv1beta2.KubeSchedulerConfiguration{}
 	kubeschedulerscheme.Scheme.Default(&versionedCfg)
 	kcfg := kubeschedulerconfig.KubeSchedulerConfiguration{}
 	if err := kubeschedulerscheme.Scheme.Convert(&versionedCfg, &kcfg, nil); err != nil {
 		return nil, err
 	}
-	if len(kcfg.Profiles) == 0 {
-		kcfg.Profiles = []kubeschedulerconfig.KubeSchedulerProfile{
-			{},
-		}
-	}
-	kcfg.Profiles[0].SchedulerName = corev1.DefaultSchedulerName
-	if kcfg.Profiles[0].Plugins == nil {
-		kcfg.Profiles[0].Plugins = &kubeschedulerconfig.Plugins{}
-	}
-	kcfg.Profiles[0].Plugins.Score = &kubeschedulerconfig.PluginSet{
-		Enabled: []kubeschedulerconfig.Plugin{
-			{
-				Name: simontype.SimonPluginName,
-			},
-			{
-				Name: simontype.OpenLocalPluginName,
-			},
-			{
-				Name: simontype.OpenGpuSharePluginName,
-			},
-		},
-	}
-	kcfg.Profiles[0].Plugins.Filter = &kubeschedulerconfig.PluginSet{
-		Enabled: []kubeschedulerconfig.Plugin{
-			{
-				Name: simontype.OpenLocalPluginName,
-			},
-			{
-				Name: simontype.OpenGpuSharePluginName,
-			},
-		},
-	}
-	kcfg.Profiles[0].Plugins.Reserve = &kubeschedulerconfig.PluginSet{
-		Enabled: []kubeschedulerconfig.Plugin{
-			{
-				Name: simontype.OpenGpuSharePluginName,
-			},
-		},
-	}
-	kcfg.Profiles[0].Plugins.Bind = &kubeschedulerconfig.PluginSet{
-		Enabled: []kubeschedulerconfig.Plugin{
-			{
-				Name: simontype.OpenLocalPluginName,
-			},
-			{
-				Name: simontype.OpenGpuSharePluginName,
-			},
-			{
-				Name: simontype.SimonPluginName,
-			},
-		},
-		Disabled: []kubeschedulerconfig.Plugin{
-			{
-				Name: defaultbinder.Name,
-			},
-		},
+	plugins := kcfg.Profiles[0].Plugins
+	plugins.Score.Enabled = append(plugins.Score.Enabled, kubeschedulerconfig.Plugin{
+		Name: simontype.SimonPluginName,
+	})
+	plugins.Bind = kubeschedulerconfig.PluginSet{
+		Enabled: []kubeschedulerconfig.Plugin{{
+			Name: simontype.SimonPluginName,
+		}},
+		Disabled: []kubeschedulerconfig.Plugin{{
+			Name: defaultbinder.Name,
+		}},
 	}
 	// set percentageOfNodesToScore value to 100
 	kcfg.PercentageOfNodesToScore = 100
 	opts := &schedoptions.Options{
-		ComponentConfig: kcfg,
+		ComponentConfig: &kcfg,
 		ConfigFile:      schedulerConfig,
 		Logs:            logs.NewOptions(),
 	}

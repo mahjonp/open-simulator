@@ -17,6 +17,7 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/kubernetes/pkg/scheduler"
+	kubeschedulerconfig "k8s.io/kubernetes/pkg/scheduler/apis/config"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	frameworkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
 	utiltrace "k8s.io/utils/trace"
@@ -66,22 +67,25 @@ type PatchPodFunc = func(pods []*corev1.Pod, client externalclientset.Interface)
 type PatchPodsFuncMap map[string]PatchPodFunc
 
 type simulatorOptions struct {
-	kubeconfig      string
-	schedulerConfig string
-	disablePTerm    bool
-	extraRegistry   frameworkruntime.Registry
-	patchPodFuncMap PatchPodsFuncMap
+	kubeconfig         string
+	schedulerConfig    string
+	scheduleConfigOpts []ScheduleConfigOption
+	disablePTerm       bool
+	extraRegistry      frameworkruntime.Registry
+	patchPodFuncMap    PatchPodsFuncMap
 }
 
 // Option configures a Simulator
 type Option func(*simulatorOptions)
+type ScheduleConfigOption func(kubeschedulerconfig.KubeSchedulerConfiguration)
 
 var defaultSimulatorOptions = simulatorOptions{
-	kubeconfig:      "",
-	schedulerConfig: "",
-	disablePTerm:    false,
-	extraRegistry:   make(map[string]frameworkruntime.PluginFactory),
-	patchPodFuncMap: make(map[string]PatchPodFunc),
+	kubeconfig:         "",
+	schedulerConfig:    "",
+	disablePTerm:       false,
+	scheduleConfigOpts: []ScheduleConfigOption{},
+	extraRegistry:      make(map[string]frameworkruntime.PluginFactory),
+	patchPodFuncMap:    make(map[string]PatchPodFunc),
 }
 
 // NewSimulator generates all components that will be needed to simulate scheduling and returns a complete simulator
@@ -94,7 +98,7 @@ func NewSimulator(ctx context.Context, opts ...Option) (*Simulator, error) {
 	}
 
 	// Step 1: get scheduler CompletedConfig and set the list of scheduler bind plugins to Simon.
-	kubeSchedulerConfig := GetSchedulerConfig()
+	kubeSchedulerConfig := GetSchedulerConfig(options.scheduleConfigOpts...)
 
 	// Step 2: create client
 	fakeClient := fakeclientset.NewSimpleClientset()
@@ -475,6 +479,12 @@ func WithExtraRegistry(extraRegistry frameworkruntime.Registry) Option {
 func WithPatchPodsFuncMap(patchPodsFuncMap PatchPodsFuncMap) Option {
 	return func(o *simulatorOptions) {
 		o.patchPodFuncMap = patchPodsFuncMap
+	}
+}
+
+func WithScheduleConfigOpts(scheduleConfigOpts []ScheduleConfigOption) Option {
+	return func(o *simulatorOptions) {
+		o.scheduleConfigOpts = scheduleConfigOpts
 	}
 }
 

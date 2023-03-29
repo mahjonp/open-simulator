@@ -308,11 +308,14 @@ func initSchedulerConfig() schedconfig.Config {
 	return *cfg.Config
 }
 
-func GetSchedulerConfig() *config.CompletedConfig {
+func GetSchedulerConfig(opts ...ScheduleConfigOption) *config.CompletedConfig {
 	copy := globalSchedulerConfig
 	copy = schedconfig.Config{
 		ComponentConfig:  *copy.ComponentConfig.DeepCopy(),
 		EventBroadcaster: events.NewEventBroadcasterAdapter(fakeclientset.NewSimpleClientset()),
+	}
+	for _, opt := range opts {
+		opt(copy.ComponentConfig)
 	}
 	cfg := copy.Complete()
 	return &cfg

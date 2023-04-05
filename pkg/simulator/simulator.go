@@ -3,7 +3,6 @@ package simulator
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -22,7 +21,6 @@ import (
 	frameworkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
 	utiltrace "k8s.io/utils/trace"
 
-	"github.com/alibaba/open-simulator/pkg/algo"
 	simonplugin "github.com/alibaba/open-simulator/pkg/simulator/plugin"
 	"github.com/alibaba/open-simulator/pkg/test"
 	simontype "github.com/alibaba/open-simulator/pkg/type"
@@ -225,10 +223,10 @@ func (sim *Simulator) ScheduleApp(ctx context.Context, app AppResource) (*Simula
 	if err != nil {
 		return nil, err
 	}
-	affinityPriority := algo.NewAffinityQueue(appPods)
-	sort.Sort(affinityPriority)
-	tolerationPriority := algo.NewTolerationQueue(appPods)
-	sort.Sort(tolerationPriority)
+	// affinityPriority := algo.NewAffinityQueue(appPods)
+	// sort.Sort(affinityPriority)
+	// tolerationPriority := algo.NewTolerationQueue(appPods)
+	// sort.Sort(tolerationPriority)
 
 	if sim.kubeclient != nil {
 		for _, patchPods := range sim.patchPodFuncMap {

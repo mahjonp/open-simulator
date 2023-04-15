@@ -18,6 +18,7 @@ import (
 
 // 仿真结果
 type SimulateResult struct {
+	ScheduledPods   []ScheduledPod   `json:"scheduledPods"`
 	UnscheduledPods []UnscheduledPod `json:"unscheduledPods"`
 	NodeStatus      []NodeStatus     `json:"nodeStatus"`
 }
@@ -26,6 +27,12 @@ type SimulateResult struct {
 type UnscheduledPod struct {
 	Pod    *corev1.Pod `json:"pod"`
 	Reason string      `json:"reason"`
+}
+
+// ScheduledPod 为已成功调度的 Pod 信息
+type ScheduledPod struct {
+	Pod      *corev1.Pod `json:"pod"`
+	NodeName string      `json:"nodeName"`
 }
 
 // 已成功调度的 Pod 信息
@@ -96,12 +103,14 @@ func Simulate(cluster ResourceTypes, apps []AppResource, opts ...Option) (*Simul
 	}
 	trace.Step("Trace Simulate make valid pod done")
 
+	var scheduledPods []ScheduledPod
 	var failedPods []UnscheduledPod
 	// run cluster
 	result, err := sim.RunCluster(cluster)
 	if err != nil {
 		return nil, err
 	}
+	scheduledPods = append(scheduledPods, result.ScheduledPods...)
 	failedPods = append(failedPods, result.UnscheduledPods...)
 	trace.Step("Trace Simulate run cluster done")
 
@@ -111,8 +120,10 @@ func Simulate(cluster ResourceTypes, apps []AppResource, opts ...Option) (*Simul
 		if err != nil {
 			return nil, err
 		}
+		scheduledPods = append(scheduledPods, result.ScheduledPods...)
 		failedPods = append(failedPods, result.UnscheduledPods...)
 	}
+	result.ScheduledPods = scheduledPods
 	result.UnscheduledPods = failedPods
 	trace.Step("Trace Simulate schedule app done")
 

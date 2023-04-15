@@ -55,9 +55,14 @@ type Simulator struct {
 	status status
 }
 
-// status captures reason why one pod fails to be scheduled
+// status captures reason why one pod fails to be scheduled or the node which one pod is scheduled to
 type status struct {
+	// stopReason is the reason why the simulator stops
 	stopReason string
+
+	// scheduled
+	// nodeName is the node name where the pod is scheduled to
+	nodeName string
 }
 
 type PatchPodFunc = func(pods []*corev1.Pod, client externalclientset.Interface) error
@@ -252,12 +257,13 @@ func (sim *Simulator) ScheduleApp(ctx context.Context, app AppResource) (*Simula
 		}
 	}
 
-	failedPod, err := sim.schedulePods(ctx, appPods)
+	scheduledPods, failedPods, err := sim.schedulePods(ctx, appPods)
 	if err != nil {
 		return nil, err
 	}
 	return &SimulateResult{
-		UnscheduledPods: failedPod,
+		ScheduledPods:   scheduledPods,
+		UnscheduledPods: failedPods,
 		NodeStatus:      sim.getClusterNodeStatus(),
 	}, nil
 }
@@ -294,8 +300,9 @@ func (sim *Simulator) runScheduler() {
 }
 
 // Run starts to schedule pods
-func (sim *Simulator) schedulePods(ctx context.Context, pods []*corev1.Pod) ([]UnscheduledPod, error) {
+func (sim *Simulator) schedulePods(ctx context.Context, pods []*corev1.Pod) ([]ScheduledPod, []UnscheduledPod, error) {
 	var failedPods []UnscheduledPod
+	var scheduledPods []ScheduledPod
 	var progressBar *pterm.ProgressbarPrinter
 	if !sim.disablePTerm {
 		progressBar, _ = pterm.DefaultProgressbar.WithTotal(len(pods)).Start()
@@ -309,7 +316,7 @@ func (sim *Simulator) schedulePods(ctx context.Context, pods []*corev1.Pod) ([]U
 			progressBar.UpdateTitle(fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
 		}
 		if _, err := sim.fakeclient.CoreV1().Pods(pod.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
-			return nil, fmt.Errorf("%s %s/%s: %s", simontype.CreatePodError, pod.Namespace, pod.Name, err.Error())
+			return nil, nil, fmt.Errorf("%s %s/%s: %s", simontype.CreatePodError, pod.Namespace, pod.Name, err.Error())
 		}
 
 		// we send value into sim.simulatorStop channel in update() function only,
@@ -320,7 +327,7 @@ func (sim *Simulator) schedulePods(ctx context.Context, pods []*corev1.Pod) ([]U
 
 		if strings.Contains(sim.status.stopReason, "failed") {
 			if err := sim.fakeclient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
-				return nil, fmt.Errorf("%s %s/%s: %s", simontype.DeletePodError, pod.Namespace, pod.Name, err.Error())
+				return nil, nil, fmt.Errorf("%s %s/%s: %s", simontype.DeletePodError, pod.Namespace, pod.Name, err.Error())
 			}
 			failedPods = append(failedPods, UnscheduledPod{
 				Pod:    pod,
@@ -328,11 +335,17 @@ func (sim *Simulator) schedulePods(ctx context.Context, pods []*corev1.Pod) ([]U
 			})
 			sim.status.stopReason = ""
 		}
+		if sim.status.stopReason == "scheduled" {
+			scheduledPods = append(scheduledPods, ScheduledPod{
+				Pod:      pod,
+				NodeName: sim.status.nodeName,
+			})
+		}
 		if !sim.disablePTerm {
 			progressBar.Increment()
 		}
 	}
-	return failedPods, nil
+	return scheduledPods, failedPods, nil
 }
 
 func (sim *Simulator) Close() {
@@ -422,12 +435,13 @@ func (sim *Simulator) syncClusterResourceList(resourceList ResourceTypes) (*Simu
 	}
 
 	// sync pods
-	failedPods, err := sim.schedulePods(context.TODO(), resourceList.Pods)
+	scheduledPods, failedPods, err := sim.schedulePods(context.TODO(), resourceList.Pods)
 	if err != nil {
 		return nil, err
 	}
 
 	return &SimulateResult{
+		ScheduledPods:   scheduledPods,
 		UnscheduledPods: failedPods,
 		NodeStatus:      sim.getClusterNodeStatus(),
 	}, nil
@@ -450,6 +464,10 @@ func (sim *Simulator) update(pod *corev1.Pod) {
 	// Only for pending pods provisioned by simon
 	if stop {
 		sim.status.stopReason = fmt.Sprintf("failed to schedule pod (%s/%s): %s: %s", pod.Namespace, pod.Name, stopReason, stopMessage)
+		sim.status.nodeName = ""
+	} else {
+		sim.status.stopReason = "scheduled"
+		sim.status.nodeName = pod.Spec.NodeName
 	}
 	sim.simulatorStop <- struct{}{}
 }
